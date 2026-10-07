@@ -1,0 +1,7 @@
+numpy>=2.0
+scipy>=1.13
+scikit-learn>=1.5
+soundfile>=0.12
+torch>=2.4
+matplotlib>=3.9
+dp-accounting==0.6.0
