@@ -14,9 +14,9 @@ import sys
 import urllib.request
 import zipfile
 
-F_ROOT = r"F:/Training_Data/FedMamba_ChebKAN"
-D_ROOT = r"D:/Training_Data/FedMamba_ChebKAN"
-UNRAR = r"C:/Program Files/WinRAR/UnRAR.exe"
+F_ROOT = os.environ.get("FMCK_DATA", "data")
+D_ROOT = os.path.dirname(os.environ.get("FMCK_MIMII", os.path.join(F_ROOT, "MIMII")))
+UNRAR = os.environ.get("UNRAR", r"C:/Program Files/WinRAR/UnRAR.exe" if os.name == "nt" else "unrar")
 LOG = os.path.join(F_ROOT, "download_log.txt")
 
 
