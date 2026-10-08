@@ -4,22 +4,22 @@ Code for **“FedMamba-ChebKAN: Federated Mamba with Chebyshev-KAN for Heterogen
 (Alsmadi, Tawfik, Fathi; under review at PLOS ONE).
 
 A Mamba selective state-space encoder with a Chebyshev-KAN head, trained federatedly with **SpectralFedAvg**:
-per-edge tail-energy truncation of Chebyshev coefficients, consensus-degree averaging on the shared basis, and an
-optional order-scaled Gaussian mechanism with matched clipping. Baselines: Local-only, Centralised (pooled data),
-FedAvg, FedProx, SCAFFOLD, FedBN, all on the same architecture, plus a 1-D CNN FedAvg reference.
+per-edge tail-energy truncation of Chebyshev coefficients and consensus-degree averaging on the shared basis;
+SpectralFedAvg-BN additionally keeps BatchNorm on the clients. Baselines: Local-only, pooled-data reference, FedAvg,
+FedProx, SCAFFOLD and FedBN, all on the same architecture, partitions, seeds and training budget.
 
 ## Layout
 ```
 fedmamba_chebkan/
-  data.py      leakage-free client partitions for CWRU, Paderborn, MIMII (fan), C-MAPSS, and the Dirichlet study
-  models.py    Mamba encoder (pure-PyTorch chunked selective scan), Chebyshev-KAN layer, 1-D CNN, task heads
-  fl.py        federated loop: FedAvg / FedProx / SCAFFOLD / FedBN / SpectralFedAvg, 8-bit uploads, DP (matched clipping)
+  data.py      leakage-free client partitions for CWRU, Paderborn, MIMII (fan) and C-MAPSS
+  models.py    Mamba encoder (pure-PyTorch chunked selective scan), Chebyshev-KAN layer, task heads
+  fl.py        federated loop: FedAvg / FedProx / SCAFFOLD / FedBN / SpectralFedAvg / SpectralFedAvg-BN
   metrics.py   accuracy, macro-F1, macro-AUROC; MIMII AUROC/AUPRC/FAR@95%TPR per machine ID; C-MAPSS RMSE and PHM08 per engine
   run.py       one run -> results/<exp>/<name>.json (per-seed metrics, curves, payload, timing)
   grid.py      the full experiment grid of the paper
   analysis.py  tables, statistics (exact Wilcoxon, rank-biserial, Benjamini-Hochberg), figures, per-seed CSV
 partitions/    client-to-recording/engine assignment manifests for every dataset
-results/       per-seed result files used in the paper
+results/main/   per-seed result file of every run reported in the paper (+ trained SpectralFedAvg models, seed 0)
 ```
 
 ## Data (public, not redistributed)
@@ -37,7 +37,6 @@ results/       per-seed result files used in the paper
 * **Paderborn**: 12 clients = 2 operating settings (N15_M07_F10, N15_M01_F10) × 6 bearing triples (one healthy, one outer-race, one inner-race real-damage bearing from K001/K002, KA04/KA15, KI04/KI14). The 20 recordings of each bearing and setting are dealt to its three clients without overlap and split 4/1/1 by recording.
 * **MIMII**: 12 clients = machine IDs 00/02/04/06 × SNR; split by clip; training and validation on normal clips only; 64 × 313 log-Mel features.
 * **C-MAPSS**: 20 clients = 5 groups of training engines per FD subset; validation engines held out per client; test = the official test engines, scored on the last window against the official RUL (one prediction per engine).
-* **Dirichlet study**: pooled CWRU drive-end windows re-partitioned over 12 clients with Dir(α) class proportions.
 
 Normalisation statistics are fitted on each client's training windows only.
 
@@ -51,10 +50,10 @@ python fedmamba_chebkan/analysis.py                                # tables, sta
 ```
 Tested with Python 3.13, PyTorch 2.12 (CUDA 12.6), one NVIDIA RTX A4000 Laptop GPU (8 GB).
 
-## Privacy note
-The order-scaled Gaussian perturbation carries an (ε, δ) guarantee only with **matched clipping** (each coefficient order
-rescaled by 1/β_n before joint clipping, Poisson client sampling, fixed normaliser), as implemented in `fl.py` (`--dp_sigma`).
-The guarantee assumes a trusted coordinator and does not cover the transmitted truncation degrees.
+## Results
+`results/main/` holds one JSON file per run (4 datasets × 8 methods × 8 seeds = 256 runs): final metrics, the selected
+round, validation/test curves, measured upload per client and round, and run time. `analysis.py` recomputes every
+table, the Wilcoxon/Benjamini–Hochberg statistics and Figures 2–7 of the paper from these files.
 
 ## License
 MIT (see LICENSE).

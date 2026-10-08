@@ -1,9 +1,9 @@
-"""Fixed experiment grid for the R3 revision, executed sequentially (one fresh process per run, finished runs skipped).
+"""Experiment grid of the paper (main comparison, 4 datasets x 8 methods x 8 seeds), executed sequentially
+(one fresh process per run, finished runs skipped).
 
 python grid.py --list          # print the job list with an ETA
 python grid.py                 # run everything not yet done
-Order: 3 seeds of every experiment first, then the remaining seeds of the main and ablation experiments,
-so a complete picture exists early and is then refined.
+The other job builders are optional studies that are not part of the paper.
 """
 import argparse
 import json
@@ -15,16 +15,15 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.environ.get("FMCK_RESULTS", os.path.join(os.path.dirname(HERE), "results"))
 LOG = os.path.join(RESULTS, "queue_log.txt")
-MINUTES = {"fl": {"cwru": 12, "paderborn": 12, "mimii": 10, "cmapss": 15, "dirichlet": 14}, "pooled": 5, "cnn": 4}
+MINUTES = {"fl": {"cwru": 3.5, "paderborn": 3.5, "mimii": 5, "cmapss": 5, "dirichlet": 4}, "pooled": 3, "cnn": 2}
 
 
 def main_jobs(seeds):
     jobs = []
     for s in seeds:
         for ds in ("cwru", "paderborn", "mimii", "cmapss"):
-            for m in ("spectral", "fedavg", "fedprox", "scaffold", "fedbn", "central", "local"):
+            for m in ("spectral", "spectral_bn", "fedavg", "fedprox", "scaffold", "fedbn", "central", "local"):
                 jobs.append(("main", ds, m, s, ["--save_model"] if (m == "spectral" and s == 0) else []))
-            jobs.append(("main", ds, "fedavg", s, ["--backbone", "cnn", "--head", "linear"]))          # ablation A
     return jobs
 
 
@@ -61,9 +60,7 @@ def noniid_jobs(seeds):
 
 
 def all_jobs():
-    first, rest = [0, 1, 2], [3, 4, 5, 6, 7]
-    return (main_jobs(first) + ablation_jobs(first) + dp_jobs(first) + sens_jobs(first) + noniid_jobs(first)
-            + main_jobs(rest) + ablation_jobs(rest))
+    return main_jobs(range(8))
 
 
 def name_of(job):

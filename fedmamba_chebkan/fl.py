@@ -47,8 +47,8 @@ def float_keys(state):
 def loss_fn(task, out, y, x):
     if task == "cls":
         return F.cross_entropy(out, y)
-    if task == "rul":
-        return F.huber_loss(out, y, delta=13.0)
+    if task == "rul":                                   # the network predicts RUL / 125 (normalised target)
+        return F.huber_loss(out, y / 125.0, delta=13.0 / 125.0)
     return F.mse_loss(out, x)
 
 
@@ -130,7 +130,7 @@ def run_federated(make_model, clients, cfg, seed, log=print):
     n_params = sum(gstate[k].numel() for k in fkeys)
     dp = cfg.get("dp_sigma", 0) > 0
     # FedBN keeps BatchNorm layers on the client; under DP they also stay local, so no unprotected statistic is released
-    local_bn = {i: {k: gstate[k].clone() for k in BN} for i in range(K)} if (method == "fedbn" or dp) else None
+    local_bn = {i: {k: gstate[k].clone() for k in BN} for i in range(K)} if (method in ("fedbn", "spectral_bn") or dp) else None
     scaf_c = {k: torch.zeros_like(v) for k, v in model.named_parameters()} if method == "scaffold" else None
     scaf_ck = {i: {k: torch.zeros_like(v) for k, v in model.named_parameters()} for i in range(K)} if method == "scaffold" else None
     beta = None
@@ -161,7 +161,7 @@ def run_federated(make_model, clients, cfg, seed, log=print):
                 local_bn[i] = {k: st[k].clone() for k in BN}
             up = {k: (st[k] - gstate[k]) for k in fkeys if not (local_bn is not None and k in BN)}
             nb_vals = sum(v.numel() for v in up.values())
-            if method == "spectral":
+            if method.startswith("spectral"):
                 for k in CH:
                     deg = tail_degrees(st[k], cfg["tau"])
                     degree_hist.append(deg.flatten().cpu().numpy().astype(np.int8))
@@ -253,6 +253,8 @@ def evaluate_global(model, state, local_bn, clients, cfg, split="te", full=False
             o = model(x[j:j + 256])
             if cfg["task"] == "ae":
                 o = (o - x[j:j + 256]).pow(2).mean(dim=(1, 2))
+            elif cfg["task"] == "rul":
+                o = o * 125.0
             outs.append(o.float())
         preds.append(torch.nan_to_num(torch.cat(outs), nan=0.0, posinf=1e6, neginf=-1e6).cpu())
         ys.append(y.cpu())

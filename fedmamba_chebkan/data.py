@@ -276,7 +276,8 @@ RUL_CAP = 125
 
 def _cmapss_read(path):
     a = np.loadtxt(path)
-    return a[:, 0].astype(int), a[:, 1].astype(int), a[:, [4 + s for s in CMAPSS_SENSORS]].astype(np.float32)
+    cond = np.round(a[:, 2]).astype(int) * 1000 + np.round(a[:, 4]).astype(int)   # altitude x throttle -> operating condition
+    return a[:, 0].astype(int), cond, a[:, [4 + s for s in CMAPSS_SENSORS]].astype(np.float32)
 
 
 def cmapss_clients(window=30, n_train=900, clients_per_fd=5):
@@ -287,21 +288,31 @@ def cmapss_clients(window=30, n_train=900, clients_per_fd=5):
     base = os.path.join(ROOT, "C-MAPSS", "CMAPSSData")
     clients = []
     for fd in range(1, 5):
-        uid, cyc, X = _cmapss_read(os.path.join(base, f"train_FD00{fd}.txt"))
+        uid, cond, X = _cmapss_read(os.path.join(base, f"train_FD00{fd}.txt"))
         units = rng.permutation(np.unique(uid))
-        tid, tcyc, TX = _cmapss_read(os.path.join(base, f"test_FD00{fd}.txt"))
+        tid, tcond, TX = _cmapss_read(os.path.join(base, f"test_FD00{fd}.txt"))
         true_rul = np.loadtxt(os.path.join(base, f"RUL_FD00{fd}.txt")).astype(np.float32)
         for g, group in enumerate(np.array_split(units, clients_per_fd)):
             va_units = group[::10]
             tr_units = np.setdiff1d(group, va_units)
-            lo = X[np.isin(uid, tr_units)].min(0)
-            hi = X[np.isin(uid, tr_units)].max(0)
-            sc = lambda a: ((a - lo) / np.maximum(hi - lo, 1e-6)).astype(np.float32)
+            # operating-condition-wise standardisation (FD002/FD004 have six conditions), fitted on this client's
+            # training engines only; an unseen condition falls back to the client's pooled statistics
+            trm = np.isin(uid, tr_units)
+            g_mu, g_sd = X[trm].mean(0), X[trm].std(0) + 1e-6
+            stats = {c: (X[trm & (cond == c)].mean(0), X[trm & (cond == c)].std(0) + 1e-6)
+                     for c in np.unique(cond[trm]) if (trm & (cond == c)).sum() > 10}
+
+            def sc(a, cnd):
+                out = np.empty_like(a)
+                for i in range(len(a)):
+                    mu, sd = stats.get(int(cnd[i]), (g_mu, g_sd))
+                    out[i] = (a[i] - mu) / sd
+                return np.clip(out, -6, 6).astype(np.float32)
 
             def engine_windows(units_, last_only=False):
                 xs, ys = [], []
                 for u in units_:
-                    xu = sc(X[uid == u])
+                    xu = sc(X[uid == u], cond[uid == u])
                     T = len(xu)
                     rul = np.minimum(np.arange(T)[::-1], RUL_CAP).astype(np.float32)
                     starts = [T - window] if last_only else range(0, T - window + 1)
@@ -315,11 +326,13 @@ def cmapss_clients(window=30, n_train=900, clients_per_fd=5):
             x_tr, y_tr = engine_windows(tr_units)
             sel = _take(rng, np.arange(len(x_tr)), n_train)
             x_va, y_va = engine_windows(va_units)
+            vsel = _take(rng, np.arange(len(x_va)), 200)          # validation windows capped for evaluation speed
+            x_va, y_va = x_va[vsel], y_va[vsel]
             # test: official test engines of this subset, assigned round-robin to the subset's clients
             t_units = np.unique(tid)[g::clients_per_fd]
             xt, yt = [], []
             for j, u in enumerate(t_units):
-                xu = sc(TX[tid == u])
+                xu = sc(TX[tid == u], tcond[tid == u])
                 if len(xu) < window:
                     xu = np.vstack([np.repeat(xu[:1], window - len(xu), 0), xu])
                 xt.append(xu[-window:].T)

@@ -72,8 +72,9 @@ class MambaBlock(nn.Module):
 class MambaEncoder(nn.Module):
     """Patch embedding (Conv1d stride p, GELU, BatchNorm, learnable positions) -> N Mamba blocks -> mean pool."""
 
-    def __init__(self, c_in, length, d_model=64, n_layers=3, patch=8, d_state=16, d_conv=4):
+    def __init__(self, c_in, length, d_model=64, n_layers=3, patch=8, d_state=16, d_conv=4, pool="mean"):
         super().__init__()
+        self.pool = pool
         self.embed = nn.Conv1d(c_in, d_model, patch, stride=patch)
         self.bn = nn.BatchNorm1d(d_model)
         n_tok = length // patch
@@ -87,7 +88,8 @@ class MambaEncoder(nn.Module):
         h = h + self.pos[:, : h.shape[1]]
         for blk in self.blocks:
             h = blk(h)
-        return self.out_norm(h).mean(1)
+        h = self.out_norm(h)
+        return h[:, -1] if self.pool == "last" else h.mean(1)     # 'last': causal state at the final step (RUL)
 
 
 class CNN1D(nn.Module):
@@ -116,7 +118,9 @@ class ChebKANLayer(nn.Module):
     def __init__(self, d_in, d_out, degree=8):
         super().__init__()
         self.degree = degree
-        self.coef = nn.Parameter(torch.randn(d_in, d_out, degree + 1) / (d_in * (degree + 1)) ** 0.5)
+        # smoothness prior: coefficient amplitude decays as (1+n)^-2, so the tail-energy criterion is informative from round 1
+        decay = (1.0 + torch.arange(degree + 1, dtype=torch.float32)) ** -2.0
+        self.coef = nn.Parameter(torch.randn(d_in, d_out, degree + 1) * decay / (d_in * decay.pow(2).sum()) ** 0.5)
         self.base = nn.Parameter(torch.empty(d_out, d_in))
         nn.init.kaiming_uniform_(self.base, a=math.sqrt(5))
 
@@ -137,7 +141,8 @@ class Net(nn.Module):
     def __init__(self, task, n_out, c_in, length, backbone="mamba", head="kan", degree=8, patch=8, kan_hidden=32):
         super().__init__()
         self.task = task
-        self.enc = MambaEncoder(c_in, length, patch=patch) if backbone == "mamba" else CNN1D(c_in, length)
+        self.enc = (MambaEncoder(c_in, length, patch=patch, pool="last" if task == "rul" else "mean")
+                    if backbone == "mamba" else CNN1D(c_in, length))
         d = self.enc.dim
         if head == "kan":
             self.kan1 = ChebKANLayer(d, kan_hidden, degree)

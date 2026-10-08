@@ -18,11 +18,11 @@ import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.environ.get("FMCK_RESULTS", os.path.join(os.path.dirname(HERE), "results"))
-METHODS = ["local", "fedavg", "fedprox", "scaffold", "fedbn", "spectral", "central"]
+METHODS = ["local", "fedavg", "fedprox", "scaffold", "fedbn", "spectral", "spectral_bn", "central"]
 LABEL = {"local": "Local-only", "fedavg": "FedAvg", "fedprox": "FedProx", "scaffold": "SCAFFOLD", "fedbn": "FedBN",
-         "spectral": "SpectralFedAvg (ours)", "central": "Pooled reference", "cnn": "FedAvg, 1-D CNN"}
+         "spectral": "SpectralFedAvg", "spectral_bn": "SpectralFedAvg-BN", "central": "Pooled reference", "cnn": "FedAvg, 1-D CNN"}
 COL = {"local": "#9C97A6", "fedavg": "#3D5A80", "fedprox": "#0F6E72", "scaffold": "#C9A227", "fedbn": "#B05C9A",
-       "spectral": "#E4572E", "central": "#1C1B22", "cnn": "#7B8CA6"}
+       "spectral": "#E4572E", "spectral_bn": "#B8431F", "central": "#1C1B22", "cnn": "#7B8CA6"}
 METRICS = {"cwru": [("acc", "Accuracy", 1), ("macro_f1", "Macro-F1", 1), ("macro_auroc", "Macro-AUROC", 1)],
            "paderborn": [("acc", "Accuracy", 1), ("macro_f1", "Macro-F1", 1), ("macro_auroc", "Macro-AUROC", 1)],
            "mimii": [("auroc", "AUROC", 1), ("auprc", "AUPRC", 1), ("far95", "FAR@95%TPR", -1)],
@@ -116,24 +116,26 @@ def bh(pvals):
 
 def significance(rows):
     out = []
-    for ds, key in PRIMARY:
-        sign = dict((k, s) for k, _, s in METRICS[ds])[key]
-        ours = {r["seed"]: r["final"].get(key) for r in main_runs(rows, ds, "spectral")}
-        for base in ("fedavg", "fedprox", "scaffold", "fedbn", "central"):
-            b = {r["seed"]: r["final"].get(key) for r in main_runs(rows, ds, base)}
-            seeds = sorted(set(ours) & set(b))
-            if len(seeds) < 3:
-                continue
-            d = sign * (np.array([ours[s] for s in seeds]) - np.array([b[s] for s in seeds]))
-            p, wp, wm, n, rrb = wilcoxon_exact(d)
-            out.append({"dataset": ds, "metric": key, "vs": base, "n": len(seeds), "mean_diff": float(d.mean()),
-                        "p": p, "r_rb": rrb, "W_plus": wp, "W_minus": wm})
-    for fam in ("baselines", "central"):
-        idx = [i for i, r in enumerate(out) if (r["vs"] == "central") == (fam == "central")]
-        if idx:
-            q = bh([out[i]["p"] for i in idx])
-            for i, qi in zip(idx, q):
-                out[i]["q"] = float(qi)
+    for prop in ("spectral", "spectral_bn"):
+        for ds, key in PRIMARY:
+            sign = dict((k, sg) for k, _, sg in METRICS[ds])[key]
+            ours = {r["seed"]: r["final"].get(key) for r in main_runs(rows, ds, prop)}
+            for base in ("fedavg", "fedprox", "scaffold", "fedbn", "central"):
+                b = {r["seed"]: r["final"].get(key) for r in main_runs(rows, ds, base)}
+                seeds = sorted(set(ours) & set(b))
+                if len(seeds) < 3:
+                    continue
+                d = sign * (np.array([ours[x] for x in seeds]) - np.array([b[x] for x in seeds]))
+                p, wp, wm, n, rrb = wilcoxon_exact(d)
+                out.append({"method": prop, "dataset": ds, "metric": key, "vs": base, "n": len(seeds),
+                            "mean_diff": float(d.mean()), "p": p, "r_rb": rrb, "W_plus": wp, "W_minus": wm})
+    for prop in ("spectral", "spectral_bn"):
+        for fam in ("baselines", "central"):
+            idx = [i for i, r in enumerate(out) if r["method"] == prop and (r["vs"] == "central") == (fam == "central")]
+            if idx:
+                q = bh([out[i]["p"] for i in idx])
+                for i, qi in zip(idx, q):
+                    out[i]["q"] = float(qi)
     return out
 
 
@@ -162,7 +164,7 @@ def fig_main(rows, out):
     panels = [("cwru", "acc", "CWRU accuracy", 1, True), ("paderborn", "macro_f1", "Paderborn macro-F1", 1, False),
               ("mimii", "auroc", "MIMII AUROC (0 dB)", 1, False), ("mimii", "far95", "MIMII FAR@95% TPR", -1, False),
               ("cmapss", "rmse", "C-MAPSS RMSE", -1, False), ("cmapss", "score", "C-MAPSS PHM08 score", -1, False)]
-    order = ["local", "cnn", "fedavg", "fedprox", "scaffold", "fedbn", "spectral", "central"]
+    order = ["local", "fedavg", "fedprox", "scaffold", "fedbn", "spectral", "spectral_bn", "central"]
     fig, axes = plt.subplots(2, 3, figsize=(7.5, 5.8))
     ypos = list(range(len(order)))[::-1]
     for ax, (ds, key, title, sign, pct) in zip(axes.flat, panels):
@@ -174,7 +176,7 @@ def fig_main(rows, out):
                 continue
             f = 100 if pct else 1
             mu, sd = f * v.mean(), f * (v.std(ddof=1) if len(v) > 1 else 0)
-            ax.errorbar(mu, y, xerr=sd, fmt="D" if m == "spectral" else "o", ms=7 if m == "spectral" else 6,
+            ax.errorbar(mu, y, xerr=sd, fmt="D" if m.startswith("spectral") else "o", ms=7 if m.startswith("spectral") else 6,
                         color=COL[m], mfc="white" if m == "central" else COL[m], mew=1.6, elinewidth=1.6, capsize=3)
             lo, hi = min(lo, mu - sd), max(hi, mu + sd)
         ax.set_yticks(ypos)
@@ -182,7 +184,9 @@ def fig_main(rows, out):
         ax.set_title(title + (" (%)" if pct else "") + ("  ↑" if sign > 0 else "  ↓"), fontsize=11, fontweight="bold", loc="left")
         ax.axhline(0.5, color="#CFC9D6", lw=0.8, ls="--")
         ax.grid(axis="x", color="#ECE9F0", lw=0.7)
-        if np.isfinite(lo):
+        if key == "score":
+            ax.set_xscale("log")                       # SCAFFOLD diverges by orders of magnitude on C-MAPSS
+        elif np.isfinite(lo):
             pad = 0.08 * (hi - lo + 1e-9)
             ax.set_xlim(lo - pad, hi + pad)
     fig.tight_layout(w_pad=1.0, h_pad=1.6)
@@ -195,7 +199,7 @@ def fig_confusion(rows, out):
     names = {"cwru": ["Normal", "Ball", "Inner", "Outer"], "paderborn": ["Healthy", "Outer", "Inner"]}
     fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.4))
     for ax, ds in zip(axes, ("cwru", "paderborn")):
-        runs = main_runs(rows, ds, "spectral")
+        runs = main_runs(rows, ds, "spectral_bn")
         if not runs:
             continue
         cm = np.sum([np.array(r["final"]["confusion"]) for r in runs], 0).astype(float)
@@ -234,18 +238,18 @@ def fig_rul(rows, out):
     a1.set_ylabel("Predicted RUL")
     a1.legend(fontsize=8, frameon=False)
     a1.set_title("Test engines, seed 0", fontsize=11, fontweight="bold", loc="left")
-    meths = ["fedavg", "scaffold", "fedbn", "spectral", "central"]
-    w = 0.16
+    meths = ["fedavg", "fedprox", "fedbn", "spectral", "spectral_bn", "central"]   # SCAFFOLD diverged (Table 4)
+    w = 0.13
     for j, m in enumerate(meths):
         rr = main_runs(rows, "cmapss", m)
         if not rr:
             continue
         mu = [np.mean([x["final"]["rmse_by_fd"][str(f)] if str(f) in x["final"]["rmse_by_fd"] else x["final"]["rmse_by_fd"][f]
                        for x in rr]) for f in (1, 2, 3, 4)]
-        a2.bar(np.arange(4) + (j - 2) * w, mu, w, color="white" if m == "central" else COL[m], edgecolor=COL[m], label=LABEL[m])
+        a2.bar(np.arange(4) + (j - 2.5) * w, mu, w, color="white" if m == "central" else COL[m], edgecolor=COL[m], label=LABEL[m])
     a2.set_xticks(range(4), [f"FD00{f}" for f in (1, 2, 3, 4)])
     a2.set_ylabel("RMSE (cycles)")
-    a2.legend(fontsize=8, frameon=False, ncol=2)
+    a2.legend(fontsize=8, frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.12))
     a2.set_title("Per-subset RMSE (mean over seeds)", fontsize=11, fontweight="bold", loc="left")
     fig.tight_layout()
     save(fig, out, "Fig4")
@@ -279,13 +283,12 @@ def comm_table(rows):
     m_round = math.ceil(0.3 * 12)
     for lab, runs in [("FedAvg", main_runs(rows, "cwru", "fedavg")), ("FedProx", main_runs(rows, "cwru", "fedprox")),
                       ("SCAFFOLD", main_runs(rows, "cwru", "scaffold")), ("FedBN", main_runs(rows, "cwru", "fedbn")),
-                      ("FedAvg, 8-bit", select(rows, exp="ablation", dataset="cwru", method="fedavg", quant8=True)),
                       ("SpectralFedAvg", main_runs(rows, "cwru", "spectral")),
-                      ("SpectralFedAvg, 8-bit", select(rows, exp="ablation", dataset="cwru", method="spectral", quant8=True))]:
+                      ("SpectralFedAvg-BN", main_runs(rows, "cwru", "spectral_bn"))]:
         if not runs:
             continue
         mb = np.mean([r["payload"] for r in runs]) / 1e6
-        rows_out.append({"method": lab, "MB_per_client_round": mb, "uplink_GB_200": mb * m_round * 200 / 1e3,
+        rows_out.append({"method": lab, "MB_per_client_round": mb, "uplink_GB_200": mb * m_round * 100 / 1e3,
                          "acc": float(np.mean(vals(runs, "acc"))), "acc_sd": float(np.std(vals(runs, "acc"), ddof=1)) if len(runs) > 1 else 0.0,
                          "n_params": runs[0]["n_params"], "seeds": len(runs)})
     return rows_out
@@ -298,7 +301,7 @@ def fig_comm(rows, out):
         return
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(7.5, 3.3))
     cmap = {"FedAvg": COL["fedavg"], "FedProx": COL["fedprox"], "SCAFFOLD": COL["scaffold"], "FedBN": COL["fedbn"],
-            "FedAvg, 8-bit": COL["fedavg"], "SpectralFedAvg": COL["spectral"], "SpectralFedAvg, 8-bit": COL["spectral"]}
+            "SpectralFedAvg": COL["spectral"], "SpectralFedAvg-BN": COL["spectral_bn"]}
     for i, r in enumerate(tab[::-1]):
         q = "8-bit" in r["method"]
         a1.barh(i, 1000 * r["MB_per_client_round"], color="white" if q else cmap[r["method"]], edgecolor=cmap[r["method"]],
@@ -311,51 +314,50 @@ def fig_comm(rows, out):
         q = "8-bit" in r["method"]
         a2.errorbar(1000 * r["uplink_GB_200"], 100 * r["acc"], yerr=100 * r["acc_sd"], fmt="D" if "Spectral" in r["method"] else "o",
                     color=cmap[r["method"]], mfc="white" if q else cmap[r["method"]], mew=1.6, capsize=3)
-        a2.annotate(r["method"], (1000 * r["uplink_GB_200"], 100 * r["acc"]), fontsize=8, xytext=(4, 4), textcoords="offset points")
-    a2.set_xlabel("Nominal fleet uplink over 200 rounds (MB)")
+        a2.plot([], [], "D" if "Spectral" in r["method"] else "o", color=cmap[r["method"]], label=r["method"])
+    a2.set_xlabel("Fleet uplink, 100 rounds (MB)")
     a2.set_ylabel("CWRU accuracy (%)")
     a2.grid(color="#ECE9F0", lw=0.7)
     a2.set_title("Accuracy vs. uplink", fontsize=11, fontweight="bold", loc="left")
+    a2.legend(fontsize=8, frameon=False, loc="center right")
     fig.tight_layout(w_pad=2)
     save(fig, out, "Fig6")
     plt.close(fig)
 
 
 def ablation_table(rows):
-    spec = [("A", "FedAvg + 1-D CNN, linear head", lambda ds: main_runs(rows, ds, "cnn")),
-            ("B", "FedAvg + Mamba, linear head", lambda ds: select(rows, exp="ablation", dataset=ds, method="fedavg", head="linear")),
-            ("C", "FedAvg + Mamba + Cheb-KAN", lambda ds: main_runs(rows, ds, "fedavg")),
-            ("D", "SpectralFedAvg, τ = 0", lambda ds: select(rows, exp="ablation", dataset=ds, method="spectral", tau=0.0)),
-            ("E", "SpectralFedAvg, τ = 10⁻³ (full)", lambda ds: main_runs(rows, ds, "spectral")),
-            ("F", "Full + 8-bit uploads", lambda ds: select(rows, exp="ablation", dataset=ds, method="spectral", quant8=True))]
+    """Component analysis from the main runs only: A (CNN, FedAvg), C (FedAvg), E (SpectralFedAvg), E-BN."""
+    spec = [("C", "FedAvg", "fedavg"), ("E", "SpectralFedAvg", "spectral"), ("E-BN", "SpectralFedAvg-BN", "spectral_bn")]
+    cols = (("cwru", "acc", True), ("paderborn", "acc", True), ("mimii", "auroc", False), ("cmapss", "rmse", False))
     out = []
-    for k, lab, fn in spec:
-        out.append({"row": k, "config": lab, "cwru_acc": ms(vals(fn("cwru"), "acc"), pct=True),
-                    "mimii_auroc": ms(vals(fn("mimii"), "auroc")), "cmapss_rmse": ms(vals(fn("cmapss"), "rmse"), nd=2),
-                    "_cwru": float(np.nanmean(vals(fn("cwru"), "acc"))) if fn("cwru") else np.nan,
-                    "_mimii": float(np.nanmean(vals(fn("mimii"), "auroc"))) if fn("mimii") else np.nan,
-                    "_cmapss": float(np.nanmean(vals(fn("cmapss"), "rmse"))) if fn("cmapss") else np.nan,
-                    "_sd": [float(np.nanstd(vals(fn(d), m), ddof=1)) if len(fn(d)) > 1 else 0.0
-                            for d, m in (("cwru", "acc"), ("mimii", "auroc"), ("cmapss", "rmse"))]})
+    for k, lab, m in spec:
+        r = {"row": k, "config": lab}
+        for ds, key, pct in cols:
+            v = vals(main_runs(rows, ds, m), key)
+            r[f"{ds}_{key}"] = ms(v, pct=pct, nd=2 if ds == "cmapss" else 3)
+            r[f"_{ds}"] = float(np.nanmean(v)) if len(v) else float("nan")
+            r[f"_{ds}_sd"] = float(np.nanstd(v, ddof=1)) if len(v) > 1 else 0.0
+        out.append(r)
     return out
 
 
 def fig_ablation(rows, out):
     plt = _plt()
     tab = ablation_table(rows)
-    fig, axes = plt.subplots(1, 3, figsize=(7.5, 3.0))
-    for ax, (k, title, f, j) in zip(axes, [("_cwru", "CWRU accuracy (%)", 100, 0), ("_mimii", "MIMII AUROC", 1, 1),
-                                         ("_cmapss", "C-MAPSS RMSE ↓", 1, 2)]):
-        y = [f * r[k] for r in tab]
-        e = [f * r["_sd"][j] for r in tab]
-        cols = ["#7B8CA6", "#3D5A80", "#3D5A80", "#E8A38F", "#E4572E", "#E4572E"]
-        ax.bar(range(6), y, yerr=e, color=cols, edgecolor="#1C1B22", lw=0.6, capsize=2)
-        ax.set_xticks(range(6), [r["row"] for r in tab])
-        ax.set_title(title, fontsize=10.5, fontweight="bold", loc="left")
-        finite = [v for v in y if np.isfinite(v)]
-        if finite:
-            lo, hi = min(finite), max(finite)
-            ax.set_ylim(lo - 0.6 * (hi - lo + 1e-9) - 1e-6, hi + 0.4 * (hi - lo + 1e-9) + 1e-6)
+    fig, axes = plt.subplots(1, 4, figsize=(7.5, 2.8))
+    cols = ["#3D5A80", "#E4572E", "#B8431F"]
+    for ax, (ds, title, f) in zip(axes, [("cwru", "CWRU acc. (%)", 100), ("paderborn", "Paderborn acc. (%)", 100),
+                                         ("mimii", "MIMII AUROC", 1), ("cmapss", "C-MAPSS RMSE (lower better)", 1)]):
+        y = [f * r[f"_{ds}"] for r in tab]
+        e = [f * r[f"_{ds}_sd"] for r in tab]
+        ax.bar(range(len(tab)), y, yerr=e, color=cols, edgecolor="#1C1B22", lw=0.6, capsize=2)
+        ax.set_xticks(range(len(tab)), [r["row"] for r in tab], fontsize=9)
+        ax.set_title(title, fontsize=9.5, fontweight="bold", loc="left")
+        ok = [(v, er) for v, er in zip(y, e) if np.isfinite(v)]
+        if ok:
+            lo, hi = min(v - er for v, er in ok), max(v + er for v, er in ok)
+            pad = 0.25 * (hi - lo + 1e-9)
+            ax.set_ylim(lo - pad, hi + pad)
     fig.tight_layout()
     save(fig, out, "Fig7")
     plt.close(fig)
@@ -365,7 +367,7 @@ def fig_convergence(rows, out):
     plt = _plt()
     fig, axes = plt.subplots(1, 2, figsize=(7.5, 3.2))
     for ax, (ds, title) in zip(axes, (("cwru", "CWRU test accuracy"), ("mimii", "MIMII test AUROC (0 dB)"))):
-        for m in ("fedavg", "fedprox", "scaffold", "fedbn", "spectral"):
+        for m in ("fedavg", "fedprox", "scaffold", "fedbn", "spectral", "spectral_bn"):
             runs = main_runs(rows, ds, m)
             if not runs:
                 continue
@@ -379,7 +381,7 @@ def fig_convergence(rows, out):
         ax.grid(color="#ECE9F0", lw=0.7)
     axes[0].legend(fontsize=8, frameon=False)
     fig.tight_layout()
-    save(fig, out, "Fig8")
+    save(fig, out, "Fig5")
     plt.close(fig)
 
 
@@ -398,7 +400,7 @@ def dp_table(rows):
         eps = None
         if dpa is not None:
             acc = dpa.rdp.RdpAccountant(orders=[1 + x / 10 for x in range(1, 100)] + list(range(12, 256)))
-            acc.compose(dpa.PoissonSampledDpEvent(0.3, dpa.GaussianDpEvent(sig)), 200)
+            acc.compose(dpa.PoissonSampledDpEvent(0.3, dpa.GaussianDpEvent(sig)), 100)
             eps = float(acc.get_epsilon(1e-5))
         out.append({"sigma": sig, "eps": eps, "acc": ms(vals(runs, "acc"), pct=True),
                     "_acc": float(np.mean(vals(runs, "acc"))) if runs else None, "seeds": len(runs)})
@@ -434,12 +436,13 @@ def main():
         w = csv.writer(f)
         w.writerow(["exp", "dataset", "method", "backbone", "head", "tau", "degree", "quant8", "dp_sigma", "alpha", "seed",
                     "payload_bytes_per_client_round", "n_params", "best_round", "wall_s"] + keys)
-        for r in sorted(rows, key=lambda r: (r["exp"], r["dataset"], r["method"], r["name"])):
+        for r in sorted([x for x in rows if x["exp"] == "main" and x["backbone"] == "mamba"],
+                        key=lambda r: (r["exp"], r["dataset"], r["method"], r["name"])):
             w.writerow([r["exp"], r["dataset"], r["method"], r["backbone"], r["head"], r["tau"], r["degree"], r["quant8"],
                         r["dp_sigma"], r["alpha"], r["seed"], r["payload"], r["n_params"], r["best_round"], r["wall_s"]]
                        + [r["final"].get(k, "") for k in keys])
     summary = {"main": {}, "significance": significance(rows), "ablation": ablation_table(rows), "dp": dp_table(rows),
-               "sensitivity": sens_table(rows), "communication": comm_table(rows)}
+               "communication": comm_table(rows)}
     for ds, mets in METRICS.items():
         summary["main"][ds] = {}
         for m in METHODS + ["cnn"]:
@@ -448,13 +451,9 @@ def main():
             for k, _, _ in mets:
                 v = vals(runs, k)
                 summary["main"][ds][m][k] = ms(v, pct=(k == "acc"), nd=2 if ds == "cmapss" else 3)
-    na = {}
-    for m in ("fedavg", "fedprox", "scaffold", "spectral"):
-        na[m] = {str(al): ms(vals(select(rows, exp="noniid", method=m, alpha=al), "acc"), pct=True)
-                 for al in (0.05, 0.1, 0.3, 0.5, 1.0, -1)}
-    summary["noniid"] = na
+
     json.dump(summary, open(os.path.join(a.out, "summary.json"), "w"), indent=1, default=float)
-    for fn in (fig_main, fig_confusion, fig_rul, fig_noniid, fig_comm, fig_ablation, fig_convergence):
+    for fn in (fig_main, fig_confusion, fig_rul, fig_convergence, fig_comm, fig_ablation):
         try:
             fn(rows, a.out)
         except Exception as e:                      # figures need complete experiments; report and continue
