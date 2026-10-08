@@ -134,7 +134,8 @@ def main(argv=None):
             eps[i] = float(acc.get_epsilon(1e-5))
         res["dp_epsilon_per_client"], res["dp_epsilon_max"], res["dp_delta"] = eps, max(eps.values()), 1e-5
     if a.save_model and state is not None:
-        torch.save(state, os.path.join(out_dir, name + ".pt"))
+        bn = getattr(run_federated, "last_bn", None) if a.method not in ("local", "central") else None
+        torch.save(state if not bn else {"global": state, "local_bn": bn}, os.path.join(out_dir, name + ".pt"))
     with open(path + ".tmp", "w") as f:
         json.dump(res, f)
     os.replace(path + ".tmp", path)

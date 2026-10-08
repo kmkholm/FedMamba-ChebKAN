@@ -18,8 +18,10 @@ fedmamba_chebkan/
   run.py       one run -> results/<exp>/<name>.json (per-seed metrics, curves, payload, timing)
   grid.py      the full experiment grid of the paper
   analysis.py  tables, statistics (exact Wilcoxon, rank-biserial, Benjamini-Hochberg), figures, per-seed CSV
+  pretrain_public.py  public pretraining (Paderborn) for the private variant
+  dp_full_grid.py     runs of the privacy study
+  xai.py       explainability figures (integrated gradients, band occlusion, t-SNE, Chebyshev coefficients)
 partitions/    client-to-recording/engine assignment manifests for every dataset
-results/main/   per-seed result file of every run reported in the paper (+ trained SpectralFedAvg models, seed 0)
 ```
 
 ## Data (public, not redistributed)
@@ -50,11 +52,6 @@ python fedmamba_chebkan/analysis.py                                # tables, sta
 ```
 Tested with Python 3.13, PyTorch 2.12 (CUDA 12.6), one NVIDIA RTX A4000 Laptop GPU (8 GB).
 
-## Results
-`results/main/` holds one JSON file per run (4 datasets × 8 methods × 8 seeds = 256 runs): final metrics, the selected
-round, validation/test curves, measured upload per client and round, and run time. `analysis.py` recomputes every
-table, the Wilcoxon/Benjamini–Hochberg statistics and Figures 2–7 of the paper from these files.
-
 ## Privacy study (example-level DP-SGD on every client)
 ```bash
 python fedmamba_chebkan/pretrain_public.py      # encoder + first KAN layer on PUBLIC Paderborn data -> results/public/
@@ -65,9 +62,10 @@ Every client clips per-example gradients (C = 1) and adds Gaussian noise before 
 holds against the coordinator and covers the uploaded coefficients and truncation degrees (post-processing). GroupNorm replaces
 BatchNorm, windows are standardised individually, and the last-round model is reported. `run.py` stores the per-client
 (epsilon, delta = 1e-5) from the realised number of noisy steps (Google `dp_accounting` RDP accountant).
-`--full_train` gives every client all non-overlapping windows of its training segments (639-924 instead of 195-260).
-`results/dp_full/` holds the runs of Table 8 (sigma 4 / 8 / 15 and the no-noise reference, seeds 1-3; `dp_full_grid.py`);
-`results/dp/` holds the same study with the 195-260 sampled windows of the main comparison (lr 3e-3), quoted in the text.
+`--full_train` gives every client all non-overlapping windows of its training segments.
 
 ## License
 MIT (see LICENSE).
+
+Run outputs are written to `results/` (not part of the repository); the per-seed results of every reported run are
+provided with the article as S1 Data.

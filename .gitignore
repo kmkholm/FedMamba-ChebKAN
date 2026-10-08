@@ -6,3 +6,4 @@ results/dp_clientlevel_old/
 results/queue_log.txt
 results/main/*cnn-linear*
 results/throttle.txt
+results/

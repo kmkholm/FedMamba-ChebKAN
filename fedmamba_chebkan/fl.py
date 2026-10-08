@@ -297,6 +297,7 @@ def run_federated(make_model, clients, cfg, seed, log=print):
     if degree_hist:
         h = np.concatenate(degree_hist)
         out["degree_hist"] = np.bincount(h, minlength=cfg["degree"] + 1).tolist()
+    run_federated.last_bn = best["bn"] if not cfg.get("select_last") else local_bn   # client-local BatchNorm states
     return out, return_state
 
 
