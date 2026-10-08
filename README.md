@@ -64,7 +64,7 @@ python fedmamba_chebkan/run.py --dataset cwru --method spectral --seed 1 --norm 
 Every client clips per-example gradients (C = 1) and adds Gaussian noise before anything leaves the device, so the guarantee
 holds against the coordinator and covers the uploaded coefficients and truncation degrees (post-processing). GroupNorm replaces
 BatchNorm, windows are standardised individually, and the last-round model is reported. `run.py` stores the per-client
-(epsilon, delta = 1e-5) from the realised number of noisy steps (Google `dp_accounting` RDP accountant). `results/dp/` holds the
+(epsilon, delta = 1e-5) from the realised number of noisy steps (Google `dp_accounting` RDP accountant).
 `--full_train` gives every client all non-overlapping windows of its training segments (639-924 instead of 195-260).
 `results/dp_full/` holds the runs of Table 8 (sigma 4 / 8 / 15 and the no-noise reference, seeds 1-3; `dp_full_grid.py`);
 `results/dp/` holds the same study with the 195-260 sampled windows of the main comparison (lr 3e-3), quoted in the text.
