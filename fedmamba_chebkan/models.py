@@ -72,11 +72,12 @@ class MambaBlock(nn.Module):
 class MambaEncoder(nn.Module):
     """Patch embedding (Conv1d stride p, GELU, BatchNorm, learnable positions) -> N Mamba blocks -> mean pool."""
 
-    def __init__(self, c_in, length, d_model=64, n_layers=3, patch=8, d_state=16, d_conv=4, pool="mean"):
+    def __init__(self, c_in, length, d_model=64, n_layers=3, patch=8, d_state=16, d_conv=4, pool="mean", norm="bn"):
         super().__init__()
         self.pool = pool
         self.embed = nn.Conv1d(c_in, d_model, patch, stride=patch)
-        self.bn = nn.BatchNorm1d(d_model)
+        # BatchNorm mixes the examples of a batch; under DP-SGD the per-example GroupNorm is used instead
+        self.bn = nn.BatchNorm1d(d_model) if norm == "bn" else nn.GroupNorm(8, d_model)
         n_tok = length // patch
         self.pos = nn.Parameter(torch.zeros(1, n_tok, d_model))
         self.blocks = nn.ModuleList([MambaBlock(d_model, d_state, d_conv) for _ in range(n_layers)])
@@ -138,10 +139,12 @@ class ChebKANLayer(nn.Module):
 class Net(nn.Module):
     """backbone in {mamba, cnn}; head in {kan, linear}; task in {cls, rul, ae}."""
 
-    def __init__(self, task, n_out, c_in, length, backbone="mamba", head="kan", degree=8, patch=8, kan_hidden=32):
+    def __init__(self, task, n_out, c_in, length, backbone="mamba", head="kan", degree=8, patch=8, kan_hidden=32, norm="bn",
+                 d_model=64, n_layers=3):
         super().__init__()
         self.task = task
-        self.enc = (MambaEncoder(c_in, length, patch=patch, pool="last" if task == "rul" else "mean")
+        self.enc = (MambaEncoder(c_in, length, d_model=d_model, n_layers=n_layers, patch=patch,
+                                 pool="last" if task == "rul" else "mean", norm=norm)
                     if backbone == "mamba" else CNN1D(c_in, length))
         d = self.enc.dim
         if head == "kan":

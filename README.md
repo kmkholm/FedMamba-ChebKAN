@@ -13,7 +13,7 @@ FedProx, SCAFFOLD and FedBN, all on the same architecture, partitions, seeds and
 fedmamba_chebkan/
   data.py      leakage-free client partitions for CWRU, Paderborn, MIMII (fan) and C-MAPSS
   models.py    Mamba encoder (pure-PyTorch chunked selective scan), Chebyshev-KAN layer, task heads
-  fl.py        federated loop: FedAvg / FedProx / SCAFFOLD / FedBN / SpectralFedAvg / SpectralFedAvg-BN
+  fl.py        federated loop: FedAvg / FedProx / SCAFFOLD / FedBN / SpectralFedAvg / SpectralFedAvg-BN, client-side DP-SGD
   metrics.py   accuracy, macro-F1, macro-AUROC; MIMII AUROC/AUPRC/FAR@95%TPR per machine ID; C-MAPSS RMSE and PHM08 per engine
   run.py       one run -> results/<exp>/<name>.json (per-seed metrics, curves, payload, timing)
   grid.py      the full experiment grid of the paper
@@ -54,6 +54,18 @@ Tested with Python 3.13, PyTorch 2.12 (CUDA 12.6), one NVIDIA RTX A4000 Laptop G
 `results/main/` holds one JSON file per run (4 datasets × 8 methods × 8 seeds = 256 runs): final metrics, the selected
 round, validation/test curves, measured upload per client and round, and run time. `analysis.py` recomputes every
 table, the Wilcoxon/Benjamini–Hochberg statistics and Figures 2–7 of the paper from these files.
+
+## Privacy study (example-level DP-SGD on every client)
+```bash
+python fedmamba_chebkan/pretrain_public.py      # encoder + first KAN layer on PUBLIC Paderborn data -> results/public/
+P=results/public/paderborn_pretrained.pt
+python fedmamba_chebkan/run.py --dataset cwru --method spectral --seed 1 --norm group --win_norm --select_last        --init $P --exp dp --lr 3e-3 --batch 4096 --local_epochs 4 --dpsgd_sigma 8 --tag _pre_dpsgd8
+```
+Every client clips per-example gradients (C = 1) and adds Gaussian noise before anything leaves the device, so the guarantee
+holds against the coordinator and covers the uploaded coefficients and truncation degrees (post-processing). GroupNorm replaces
+BatchNorm, windows are standardised individually, and the last-round model is reported. `run.py` stores the per-client
+(epsilon, delta = 1e-5) from the realised number of noisy steps (Google `dp_accounting` RDP accountant). `results/dp/` holds the
+runs of Table 8 (sigma 4 / 8 / 15 and the no-noise reference, seeds 1-3).
 
 ## License
 MIT (see LICENSE).

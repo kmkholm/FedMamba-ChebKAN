@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.func import functional_call, grad, vmap
 
 from metrics import evaluate
 
@@ -52,8 +53,53 @@ def loss_fn(task, out, y, x):
     return F.mse_loss(out, x)
 
 
+def dpsgd_train(model, data, cfg, gen, steps_out=None):
+    """Example-level DP-SGD on one client (Abadi et al., 2016): Poisson sampling at rate q = B/n, per-example gradients
+    clipped to C, Gaussian noise N(0, sigma^2 C^2) added on the client, divided by the expected batch size B; Adam is
+    post-processing, and everything the client uploads is a function of these noisy steps."""
+    x, y = data["x_tr"], data["y_tr"]
+    n, B = len(x), cfg["batch"]
+    q = min(1.0, B / n)
+    C, sig = cfg["dpsgd_clip"], cfg["dpsgd_sigma"]
+    opt = torch.optim.Adam(model.parameters(), lr=cfg["lr"], weight_decay=cfg["wd"])
+    model.train()
+    names = [k for k, p in model.named_parameters() if p.requires_grad]       # frozen (public) weights get no noise
+
+    def f(p, b, xi, yi):
+        out = functional_call(model, (p, b), (xi.unsqueeze(0),))
+        return loss_fn(cfg["task"], out, yi.unsqueeze(0), xi.unsqueeze(0))
+    per_ex = vmap(grad(f), in_dims=(None, None, 0, 0))
+    steps = 0
+    for _ in range(cfg["local_epochs"]):
+        for _ in range(max(1, round(n / B))):
+            mask = torch.rand(n, generator=gen) < q
+            idx = mask.nonzero().flatten().to(x.device)
+            params = {k: v.detach() for k, v in model.named_parameters() if v.requires_grad}
+            buffers = {k: v.detach() for k, v in model.named_buffers()}
+            buffers.update({k: v.detach() for k, v in model.named_parameters() if not v.requires_grad})
+            gsum = {k: torch.zeros_like(v) for k, v in params.items()}
+            for j in range(0, len(idx), 128):                       # chunks only bound memory; the sum is exact
+                sub = idx[j:j + 128]
+                g = per_ex(params, buffers, x[sub], y[sub])
+                norms = torch.sqrt(sum(g[k].flatten(1).pow(2).sum(1) for k in names))
+                fct = (C / (norms + 1e-12)).clamp(max=1.0)
+                for k in names:
+                    gsum[k] += torch.einsum("b,b...->...", fct, g[k])
+            for k, p in model.named_parameters():
+                if p.requires_grad:
+                    p.grad = (gsum[k] + torch.randn(p.shape, device=p.device) * sig * C) / (q * n)   # expected batch size
+            opt.step()
+            steps += 1
+            _pause()
+    if steps_out is not None:
+        steps_out.append(steps)
+    return model
+
+
 def local_train(model, data, cfg, gen, global_state=None, prox_mu=0.0, scaffold=None, steps_out=None):
     """Train `model` in place for cfg.local_epochs on client data (tensors already on the device)."""
+    if cfg.get("dpsgd_sigma", 0) > 0:
+        return dpsgd_train(model, data, cfg, gen, steps_out)
     x, y = data["x_tr"], data["y_tr"]
     n = len(x)
     bs = cfg["batch"]
@@ -140,6 +186,7 @@ def run_federated(make_model, clients, cfg, seed, log=print):
     m_per_round = max(1, math.ceil(cfg["frac"] * K))
     best = {"val": None, "state": None, "bn": None, "round": 0}
     curve, payload_rounds, degree_hist = [], [], []
+    dpsgd_steps = {i: [] for i in range(K)}
     t0 = time.time()
     for rnd in range(1, cfg["rounds"] + 1):
         if dp:   # Poisson sampling at rate q = frac (needed by the subsampled-Gaussian accountant)
@@ -156,6 +203,8 @@ def run_federated(make_model, clients, cfg, seed, log=print):
             local_train(model, clients[i], cfg, gen, global_state=gstate if method == "fedprox" else None,
                         prox_mu=cfg["mu"] if method == "fedprox" else 0.0,
                         scaffold=(scaf_c, scaf_ck[i]) if method == "scaffold" else None, steps_out=steps)
+            if cfg.get("dpsgd_sigma", 0) > 0:
+                dpsgd_steps[i].append(steps[0])
             st = {k: v.detach().clone() for k, v in model.state_dict().items()}
             if local_bn is not None:
                 local_bn[i] = {k: st[k].clone() for k in BN}
@@ -217,6 +266,11 @@ def run_federated(make_model, clients, cfg, seed, log=print):
             if method == "scaffold":
                 for k in scaf_c:
                     scaf_c[k] += (len(uploads) / K) * sum(up["__dc__"][k] for up in uploads) / len(uploads)
+        # -------- server-side exponential moving average of the global model (post-processing of released states)
+        if cfg.get("ema", 0) > 0:
+            d = cfg["ema"]
+            ema = {k: v.clone() for k, v in gstate.items()} if rnd == 1 else \
+                {k: (d * ema[k] + (1 - d) * gstate[k]) if gstate[k].dtype.is_floating_point else gstate[k] for k in gstate}
         # -------- evaluation
         if rnd % cfg["eval_every"] == 0 or rnd == cfg["rounds"]:
             val = evaluate_global(model, gstate, local_bn, clients, cfg, split="va")
@@ -231,10 +285,19 @@ def run_federated(make_model, clients, cfg, seed, log=print):
     out = {"final": final, "best_round": best["round"], "curve": curve, "n_params": n_params,
            "payload_bytes_per_client_round": float(np.mean(payload_rounds)) if payload_rounds else 0.0,
            "train_time_s": round(time.time() - t0, 1)}
+    if cfg.get("dpsgd_sigma", 0) > 0:
+        out["dpsgd_steps"] = {str(i): v for i, v in dpsgd_steps.items()}
+    if cfg.get("select_last"):                       # DP runs: the last-round model, no selection on private validation data
+        return_state = ema if cfg.get("ema", 0) > 0 else gstate
+        out["final"] = evaluate_global(model, return_state, local_bn, clients, cfg, split="te", full=True)
+        out["final_last_round"] = evaluate_global(model, gstate, local_bn, clients, cfg, split="te", full=True)
+        out["best_round"] = cfg["rounds"]
+    else:
+        return_state = best["state"]
     if degree_hist:
         h = np.concatenate(degree_hist)
         out["degree_hist"] = np.bincount(h, minlength=cfg["degree"] + 1).tolist()
-    return out, best["state"]
+    return out, return_state
 
 
 @torch.no_grad()
