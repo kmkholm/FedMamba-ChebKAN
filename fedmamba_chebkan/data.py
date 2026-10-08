@@ -89,6 +89,31 @@ def cwru_clients(n_train_per_class=65, n_eval_per_class=40, L=1024):
     return clients
 
 
+def cwru_full_train(L=1024):
+    """All non-overlapping training windows of every CWRU client (same 60 % training segments as cwru_clients, no
+    subsampling); used by the privacy study, where the noise per step is fixed and more examples raise the signal.
+    Validation and test sets are those of cwru_clients."""
+    path = os.path.join(CACHE, "cwru_full_train.npz")
+    if os.path.exists(path):
+        return list(np.load(path, allow_pickle=True)["clients"])
+    out = []
+    for load in range(4):
+        for sensor in ("DE", "FE", "BA"):
+            xs, ys = [], []
+            for cls, per_load in CWRU_FILES.items():
+                for fid in per_load[load]:
+                    x = _cwru_signal(fid, sensor)
+                    if x is None:
+                        continue
+                    w = _windows(x[:int(0.6 * len(x))], L, L)
+                    xs.append(w)
+                    ys.append(np.full(len(w), cls, np.int64))
+            out.append({"x_tr": np.concatenate(xs)[:, None, :], "y_tr": np.concatenate(ys)})
+    os.makedirs(CACHE, exist_ok=True)
+    np.savez(path, clients=np.array(out, dtype=object))
+    return out
+
+
 def cwru_pooled_de(n_train_per_class=260, n_eval_per_class=160, L=1024):
     """Pooled drive-end data of all four loads, used by the Dirichlet non-IID study."""
     rng = np.random.default_rng(PARTITION_SEED + 1)

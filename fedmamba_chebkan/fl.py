@@ -78,8 +78,8 @@ def dpsgd_train(model, data, cfg, gen, steps_out=None):
             buffers = {k: v.detach() for k, v in model.named_buffers()}
             buffers.update({k: v.detach() for k, v in model.named_parameters() if not v.requires_grad})
             gsum = {k: torch.zeros_like(v) for k, v in params.items()}
-            for j in range(0, len(idx), 128):                       # chunks only bound memory; the sum is exact
-                sub = idx[j:j + 128]
+            for j in range(0, len(idx), 256):                       # chunks only bound memory; the sum is exact
+                sub = idx[j:j + 256]
                 g = per_ex(params, buffers, x[sub], y[sub])
                 norms = torch.sqrt(sum(g[k].flatten(1).pow(2).sum(1) for k in names))
                 fct = (C / (norms + 1e-12)).clamp(max=1.0)

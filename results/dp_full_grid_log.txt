@@ -1,0 +1,15 @@
+--lr 5e-3 --dpsgd_sigma 8 --tag _full_dp8_lr5 | rc 0 | done cwru_spectral_mamba-kan_full_dp8_lr5_s0: primary 0.9102 in 961s
+validation (last round): lr 3e-3 0.8881, lr 5e-3 0.9068 -> lr 5e-3
+--seed 1 --exp dp_full --tag _full_nodp | rc 0 | done cwru_spectral_mamba-kan_full_nodp_s1: primary 0.9256 in 472s
+--lr 5e-3 --dpsgd_sigma 4 --tag _full_dpsgd4 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd4_s1: primary 0.9244 in 980s
+--lr 5e-3 --dpsgd_sigma 8 --tag _full_dpsgd8 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd8_s1: primary 0.8938 in 966s
+--lr 5e-3 --dpsgd_sigma 15 --tag _full_dpsgd15 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd15_s1: primary 0.8665 in 947s
+--seed 2 --exp dp_full --tag _full_nodp | rc 0 | done cwru_spectral_mamba-kan_full_nodp_s2: primary 0.9131 in 456s
+--lr 5e-3 --dpsgd_sigma 4 --tag _full_dpsgd4 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd4_s2: primary 0.9233 in 921s
+--lr 5e-3 --dpsgd_sigma 8 --tag _full_dpsgd8 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd8_s2: primary 0.9006 in 921s
+--lr 5e-3 --dpsgd_sigma 15 --tag _full_dpsgd15 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd15_s2: primary 0.8557 in 921s
+--seed 3 --exp dp_full --tag _full_nodp | rc 0 | done cwru_spectral_mamba-kan_full_nodp_s3: primary 0.9375 in 450s
+--lr 5e-3 --dpsgd_sigma 4 --tag _full_dpsgd4 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd4_s3: primary 0.9256 in 911s
+--lr 5e-3 --dpsgd_sigma 8 --tag _full_dpsgd8 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd8_s3: primary 0.8915 in 922s
+--lr 5e-3 --dpsgd_sigma 15 --tag _full_dpsgd15 | rc 0 | done cwru_spectral_mamba-kan_full_dpsgd15_s3: primary 0.8449 in 941s
+grid finished

@@ -40,6 +40,8 @@ def main(argv=None):
     ap.add_argument("--norm", default="bn", choices=["bn", "group"])
     ap.add_argument("--win_norm", action="store_true", help="standardise every window by its own mean and s.d.")
     ap.add_argument("--select_last", action="store_true")
+    ap.add_argument("--full_train", action="store_true",
+                    help="CWRU: all non-overlapping windows of the training segments (privacy study); needs --win_norm")
     ap.add_argument("--frontend", default="raw", choices=["raw", "fft"],
                     help="fft: fixed per-window log-magnitude spectrum (512 bins), a data-independent transform")
     ap.add_argument("--d_model", type=int, default=64)
@@ -76,6 +78,10 @@ def main(argv=None):
         clients = D.load("dirichlet", alpha=None if a.alpha <= 0 else a.alpha, seed=a.seed)
     else:
         clients = D.load(a.dataset)
+    if a.full_train:
+        assert a.dataset == "cwru" and a.win_norm
+        for c, f in zip(clients, D.cwru_full_train()):
+            c["x_tr"], c["y_tr"] = f["x_tr"], f["y_tr"]
     for c in clients:
         for k in list(c):
             if k.startswith(("x_", "y_")):
@@ -89,7 +95,7 @@ def main(argv=None):
                quant8=a.quant8, dp_sigma=a.dp_sigma, dp_clip=a.dp_clip, gamma=1.0, eval_every=5, device=dev,
                pooled_epochs=a.pooled_epochs, pooled_eval_every=2, dpsgd_sigma=a.dpsgd_sigma,
                dpsgd_clip=a.dpsgd_clip, norm=a.norm, win_norm=a.win_norm, select_last=a.select_last, ema=a.ema, init=os.path.basename(a.init), train_only=a.train_only,
-               frontend=a.frontend, d_model=a.d_model, layers=a.layers, backbone=a.backbone, head=a.head, alpha=a.alpha,
+               frontend=a.frontend, d_model=a.d_model, layers=a.layers, full_train=a.full_train, backbone=a.backbone, head=a.head, alpha=a.alpha,
                clients=len(clients))
 
     def make_model():

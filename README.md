@@ -59,13 +59,15 @@ table, the Wilcoxon/Benjamini–Hochberg statistics and Figures 2–7 of the pap
 ```bash
 python fedmamba_chebkan/pretrain_public.py      # encoder + first KAN layer on PUBLIC Paderborn data -> results/public/
 P=results/public/paderborn_pretrained.pt
-python fedmamba_chebkan/run.py --dataset cwru --method spectral --seed 1 --norm group --win_norm --select_last        --init $P --exp dp --lr 3e-3 --batch 4096 --local_epochs 4 --dpsgd_sigma 8 --tag _pre_dpsgd8
+python fedmamba_chebkan/run.py --dataset cwru --method spectral --seed 1 --norm group --win_norm --select_last        --full_train --init $P --exp dp_full --lr 5e-3 --batch 4096 --local_epochs 4 --dpsgd_sigma 8 --tag _full_dpsgd8
 ```
 Every client clips per-example gradients (C = 1) and adds Gaussian noise before anything leaves the device, so the guarantee
 holds against the coordinator and covers the uploaded coefficients and truncation degrees (post-processing). GroupNorm replaces
 BatchNorm, windows are standardised individually, and the last-round model is reported. `run.py` stores the per-client
 (epsilon, delta = 1e-5) from the realised number of noisy steps (Google `dp_accounting` RDP accountant). `results/dp/` holds the
-runs of Table 8 (sigma 4 / 8 / 15 and the no-noise reference, seeds 1-3).
+`--full_train` gives every client all non-overlapping windows of its training segments (639-924 instead of 195-260).
+`results/dp_full/` holds the runs of Table 8 (sigma 4 / 8 / 15 and the no-noise reference, seeds 1-3; `dp_full_grid.py`);
+`results/dp/` holds the same study with the 195-260 sampled windows of the main comparison (lr 3e-3), quoted in the text.
 
 ## License
 MIT (see LICENSE).
